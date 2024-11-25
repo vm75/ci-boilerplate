@@ -1,1 +1,6 @@
+data/
+__debug*
+.DS_Store
+*.log
+var/
 *.tmp

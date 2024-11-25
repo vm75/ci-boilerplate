@@ -20,7 +20,7 @@ var db *sql.DB
 func main() {
 	var err error
 	// Initialize the SQLite database
-	db, err = sql.Open("sqlite3", "./test.db")
+	db, err = sql.Open("sqlite3", "/data/test.db")
 	if err != nil {
 		log.Fatalf("Failed to open database: %v", err)
 	}
