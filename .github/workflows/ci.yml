@@ -13,14 +13,11 @@ env:
   IMAGE_NAME: ${{ github.repository }}
 
 jobs:
-  build-publish-tag:
-    name: Build and Publish Docker Image with Auto-Tagging
+  build-and-tag:
+    name: Build Docker Image and Tag Repository
     runs-on: ubuntu-latest
     permissions:
-      packages: write
       contents: write
-      attestations: write
-      id-token: write
     steps:
       - name: Check out the repository
         uses: actions/checkout@v4
@@ -34,12 +31,52 @@ jobs:
             exit 1
           fi
           echo "Extracted version: $version"
-          # Parse major and minor versions
           major=$(echo "$version" | cut -d. -f1)
           minor=$(echo "$version" | cut -d. -f1,2)
           echo "major=$major" >> $GITHUB_ENV
           echo "minor=$minor" >> $GITHUB_ENV
           echo "version=$version" >> $GITHUB_ENV
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+        with:
+          install: true
+          driver: docker-container
+          driver-opts: image=moby/buildkit:latest
+
+      - name: Build Image (without pushing)
+        id: build
+        uses: docker/build-push-action@v4
+        with:
+          context: .
+          push: false
+          tags: |
+            ${{ github.repository }}:latest
+            ${{ github.repository }}:${{ env.version }}
+            ${{ github.repository }}:${{ env.major }}
+            ${{ github.repository }}:${{ env.minor }}
+
+      - name: Create and push Git tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag ${{ env.version }}
+          git push origin ${{ env.version }}
+
+  publish:
+    name: Publish Docker Image
+    runs-on: ubuntu-latest
+    needs: build-and-tag
+    permissions:
+      packages: write
+      contents: read
+    steps:
+      - name: Approve and publish
+        uses: hmarr/auto-approve-action@v2 # Manual approval gate
+      - name: Check out the repository
+        uses: actions/checkout@v4
 
       - name: Log in to Docker Hub
         uses: docker/login-action@v3
@@ -54,19 +91,7 @@ jobs:
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
-        with:
-          install: true
-          driver: docker-container
-          driver-opts: image=moby/buildkit:latest
-
-      - name: Set up QEMU for cross-platform builds
-        uses: docker/setup-qemu-action@v3
-        with:
-          platforms: all
-
-      - name: Build and Push
+      - name: Push Docker Image
         id: push
         uses: docker/build-push-action@v4
         with:
@@ -77,10 +102,6 @@ jobs:
             ${{ github.repository }}:${{ env.version }}
             ${{ github.repository }}:${{ env.major }}
             ${{ github.repository }}:${{ env.minor }}
-            ${{ env.REGISTRY }}/${{ github.repository }}:latest
-            ${{ env.REGISTRY }}/${{ github.repository }}:${{ env.version }}
-            ${{ env.REGISTRY }}/${{ github.repository }}:${{ env.major }}
-            ${{ env.REGISTRY }}/${{ github.repository }}:${{ env.minor }}
           platforms: linux/amd64,linux/arm64,linux/arm/v7
 
       - name: Verify Image on Docker Hub
@@ -92,12 +113,3 @@ jobs:
           subject-name: ${{ env.REGISTRY }}/${{ env.IMAGE_NAME }}
           subject-digest: ${{ steps.push.outputs.digest }}
           push-to-registry: true
-
-      - name: Create and push Git tag
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag ${{ env.version }}
-          git push origin ${{ env.version }}
